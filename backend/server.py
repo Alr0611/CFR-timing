@@ -17,10 +17,9 @@ LOG_DIR    = os.path.join(os.path.dirname(__file__), "..", "logs")
 app = Flask(__name__, template_folder="../frontend")
 io  = SocketIO(app, cors_allowed_origins="*")
 
-# ─── SHARED STATE ─────────────────────────────────────────
 lock  = threading.Lock()
 state = {
-    "mode":          "lap",   # "lap" | "accel"
+    "mode":          "lap",
     "armed":         False,
     "laps":          [],
     "runs":          [],
@@ -29,7 +28,6 @@ state = {
     "_run_start":    None,
     "_esp_offset":   None,
 }
-# ──────────────────────────────────────────────────────────
 
 def handle_trigger(node_id: int, esp_ms: int):
     with lock:
@@ -52,6 +50,8 @@ def _handle_lap(node_id: int, wall_ts: float):
         io.emit("event", {"type": "lap_started"})
     else:
         lap_time = wall_ts - state["_lap_start"]
+        if lap_time <= 0:
+            return
         entry = {
             "lap":      len(state["laps"]) + 1,
             "time_s":   round(lap_time, 3),
@@ -68,6 +68,8 @@ def _handle_accel(node_id: int, wall_ts: float):
         io.emit("event", {"type": "run_started"})
     elif node_id == 2 and state["_run_start"] is not None:
         run_time = wall_ts - state["_run_start"]
+        if run_time <= 0:
+            return
         entry = {
             "run":      len(state["runs"]) + 1,
             "time_s":   round(run_time, 3),
@@ -84,7 +86,6 @@ def fmt_time(seconds: float) -> str:
     ms = int((seconds - int(seconds)) * 1000)
     return f"{m}:{s:02d}.{ms:03d}"
 
-# ─── UDP LISTENER ─────────────────────────────────────────
 def udp_listener():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((UDP_IP, UDP_PORT))
@@ -100,7 +101,6 @@ def udp_listener():
         except Exception as e:
             print(f"[UDP] Parse error: {e}")
 
-# ─── ROUTES ───────────────────────────────────────────────
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -175,7 +175,6 @@ def api_export():
         headers={"Content-Disposition": f"attachment; filename=session_{mode}_{ts}.csv"}
     )
 
-# ─── MAIN ─────────────────────────────────────────────────
 if __name__ == "__main__":
     threading.Thread(target=udp_listener, daemon=True).start()
     print(f"[WEB] Open http://localhost:{FLASK_PORT}")

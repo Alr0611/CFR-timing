@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CFR Timing</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;400;600;700;900&display=swap');
+
+  :root {
+    --bg:       #0a0a0a;
+    --bg2:      #111111;
+    --bg3:      #1a1a1a;
+    --border:   #2a2a2a;
+    --accent:   #e8ff00;
+    --accent2:  #ff4400;
+    --text:     #f0f0f0;
+    --muted:    #555;
+    --green:    #00ff88;
+    --red:      #ff3333;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Barlow Condensed', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.03) 2px,
+      rgba(0,0,0,0.03) 4px
+    );
+    pointer-events: none;
+    z-index: 1000;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 32px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+  }
+
+  .logo {
+    font-size: 22px;
+    font-weight: 900;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+  }
+
+  .logo span { color: var(--accent); }
+
+  .status-pill {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    padding: 5px 14px;
+    border-radius: 2px;
+    border: 1px solid var(--muted);
+    color: var(--muted);
+    text-transform: uppercase;
+    transition: all 0.2s;
+  }
+  .status-pill.armed {
+    border-color: var(--green);
+    color: var(--green);
+    box-shadow: 0 0 12px rgba(0,255,136,0.2);
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+  .status-pill.running {
+    border-color: var(--accent);
+    color: var(--accent);
+    box-shadow: 0 0 12px rgba(232,255,0,0.2);
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.6; }
+  }
+
+  .main {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 0;
+    min-height: calc(100vh - 65px);
+  }
+
+  /* LEFT PANEL */
+  .controls {
+    background: var(--bg2);
+    border-right: 1px solid var(--border);
+    padding: 28px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+
+  .section-label {
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+
+  /* Mode toggle */
+  .mode-toggle {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    background: var(--bg3);
+    padding: 4px;
+    border-radius: 4px;
+  }
+
+  .mode-btn {
+    padding: 10px;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    cursor: pointer;
+    border-radius: 2px;
+    transition: all 0.15s;
+  }
+  .mode-btn.active {
+    background: var(--accent);
+    color: var(--bg);
+  }
+
+  /* Arm button */
+  .arm-btn {
+    width: 100%;
+    padding: 16px;
+    border: 2px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.15s;
+    position: relative;
+    overflow: hidden;
+  }
+  .arm-btn:hover { border-color: var(--green); color: var(--green); }
+  .arm-btn.armed {
+    border-color: var(--green);
+    color: var(--green);
+    background: rgba(0,255,136,0.05);
+  }
+  .arm-btn.armed:hover { border-color: var(--red); color: var(--red); background: rgba(255,51,51,0.05); }
+
+  /* Action buttons */
+  .action-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .btn {
+    padding: 11px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    cursor: pointer;
+    border-radius: 2px;
+    transition: all 0.15s;
+  }
+  .btn:hover { border-color: var(--text); color: var(--text); }
+  .btn.danger:hover { border-color: var(--red); color: var(--red); }
+  .btn.export:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Connection status */
+  .conn-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .conn-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--muted);
+    transition: background 0.3s;
+  }
+  .conn-dot.connected { background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+  /* RIGHT PANEL */
+  .data-panel {
+    padding: 28px 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+
+  /* Big timer */
+  .timer-display {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 72px;
+    font-weight: 400;
+    letter-spacing: 0.05em;
+    color: var(--accent);
+    line-height: 1;
+    min-height: 80px;
+  }
+  .timer-display.inactive { color: var(--muted); }
+  .timer-label {
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-top: 6px;
+  }
+
+  /* Lap table */
+  .table-wrap {
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 13px;
+  }
+
+  th {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-align: left;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    transition: background 0.2s;
+  }
+
+  tr:hover td { background: var(--bg3); }
+
+  tr.new-entry td {
+    animation: flashRow 0.6s ease-out;
+  }
+
+  @keyframes flashRow {
+    0%   { background: rgba(232,255,0,0.15); }
+    100% { background: transparent; }
+  }
+
+  .time-cell {
+    font-size: 16px;
+    color: var(--accent);
+  }
+
+  .best-cell { color: var(--green); }
+  .worst-cell { color: var(--red); }
+
+  .empty-state {
+    padding: 48px 12px;
+    color: var(--muted);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.1em;
+  }
+
+  /* Last trigger flash overlay */
+  .flash-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(232,255,0,0.04);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.05s;
+    z-index: 999;
+  }
+  .flash-overlay.flash { opacity: 1; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<div class="flash-overlay" id="flashOverlay"></div>
+
+<header>
+  <div class="logo">CFR <span>Timing</span></div>
+  <div id="statusPill" class="status-pill">disarmed</div>
+</header>
+
+<div class="main">
+
+  <!-- LEFT: controls -->
+  <div class="controls">
+
+    <div>
+      <div class="section-label">Mode</div>
+      <div class="mode-toggle">
+        <button class="mode-btn active" id="btnLap"   onclick="setMode('lap')">Lap</button>
+        <button class="mode-btn"        id="btnAccel" onclick="setMode('accel')">Accel</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-label">Control</div>
+      <button class="arm-btn" id="armBtn" onclick="toggleArm()">Arm Sensor</button>
+    </div>
+
+    <div>
+      <div class="section-label">Session</div>
+      <div class="action-row">
+        <button class="btn danger"  onclick="resetSession()">Reset</button>
+        <button class="btn export"  onclick="exportCSV()">Export CSV</button>
+      </div>
+    </div>
+
+    <div style="margin-top: auto;">
+      <div class="section-label">Connection</div>
+      <div class="conn-status">
+        <div class="conn-dot" id="connDot"></div>
+        <span id="connText">waiting...</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- RIGHT: data -->
+  <div class="data-panel">
+
+    <div>
+      <div class="timer-display inactive" id="timerDisplay">-:--.---</div>
+      <div class="timer-label" id="timerLabel">waiting for first trigger</div>
+    </div>
+
+    <div class="table-wrap">
+      <table id="dataTable">
+        <thead id="tableHead"></thead>
+        <tbody id="tableBody">
+          <tr><td colspan="4" class="empty-state">// no data yet — arm the sensor and send the car</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  const socket = io();
+  let armed    = false;
+  let mode     = 'lap';
+  let entries  = [];
+  let liveStart = null;
+  let liveTimer = null;
+
+  // ── Socket events ──────────────────────────────────────
+  socket.on('connect',    () => setConn(true));
+  socket.on('disconnect', () => setConn(false));
+
+  socket.on('event', (e) => {
+    if (e.type === 'armed')        { armed = true;  updateArmUI(); }
+    if (e.type === 'disarmed')     { armed = false; updateArmUI(); stopLive(); }
+    if (e.type === 'mode_changed') { mode = e.mode; updateModeUI(); }
+    if (e.type === 'reset')        { entries = []; renderTable(); stopLive(); setTimerDisplay('-:--.---', true); }
+    if (e.type === 'lap_started' || e.type === 'run_started') {
+      liveStart = Date.now();
+      startLiveTimer();
+      setStatus('running');
+    }
+    if (e.type === 'lap' || e.type === 'run') {
+      flash();
+      entries.push(e.data);
+      setTimerDisplay(e.data.time_fmt, false);
+      stopLive();
+      renderTable();
+    }
+  });
+
+  // ── Fetch initial state ────────────────────────────────
+  fetch('/api/state').then(r => r.json()).then(s => {
+    mode    = s.mode;
+    armed   = s.armed;
+    entries = mode === 'lap' ? s.laps : s.runs;
+    updateModeUI();
+    updateArmUI();
+    renderTable();
+  });
+
+  // ── Controls ───────────────────────────────────────────
+  function setMode(m) {
+    fetch('/api/mode', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({mode:m}) });
+  }
+
+  function toggleArm() {
+    fetch(armed ? '/api/disarm' : '/api/arm', { method: 'POST' });
+  }
+
+  function resetSession() {
+    if (!confirm('Reset session? All times will be cleared.')) return;
+    fetch('/api/reset', { method: 'POST' });
+  }
+
+  function exportCSV() {
+    window.location.href = '/api/export';
+  }
+
+  // ── UI updates ─────────────────────────────────────────
+  function updateArmUI() {
+    const btn  = document.getElementById('armBtn');
+    const pill = document.getElementById('statusPill');
+    if (armed) {
+      btn.textContent = 'Disarm Sensor';
+      btn.classList.add('armed');
+      pill.textContent = 'ARMED';
+      pill.className = 'status-pill armed';
+    } else {
+      btn.textContent = 'Arm Sensor';
+      btn.classList.remove('armed');
+      pill.textContent = 'DISARMED';
+      pill.className = 'status-pill';
+      setStatus('disarmed');
+    }
+  }
+
+  function setStatus(s) {
+    const pill = document.getElementById('statusPill');
+    if (s === 'running') {
+      pill.textContent = 'RUNNING';
+      pill.className = 'status-pill running';
+    }
+  }
+
+  function updateModeUI() {
+    document.getElementById('btnLap').classList.toggle('active', mode === 'lap');
+    document.getElementById('btnAccel').classList.toggle('active', mode === 'accel');
+    entries = [];
+    renderTable();
+    setTimerDisplay('-:--.---', true);
+  }
+
+  function setConn(ok) {
+    document.getElementById('connDot').className  = 'conn-dot' + (ok ? ' connected' : '');
+    document.getElementById('connText').textContent = ok ? 'server connected' : 'disconnected';
+  }
+
+  function setTimerDisplay(t, inactive) {
+    const el = document.getElementById('timerDisplay');
+    el.textContent = t;
+    el.className = 'timer-display' + (inactive ? ' inactive' : '');
+    document.getElementById('timerLabel').textContent = inactive ? 'waiting for first trigger' : (mode === 'lap' ? 'last lap' : 'last run');
+  }
+
+  // ── Live timer ─────────────────────────────────────────
+  function startLiveTimer() {
+    stopLive();
+    liveTimer = setInterval(() => {
+      const elapsed = (Date.now() - liveStart) / 1000;
+      document.getElementById('timerDisplay').textContent = fmtTime(elapsed);
+      document.getElementById('timerDisplay').className = 'timer-display';
+      document.getElementById('timerLabel').textContent = mode === 'lap' ? 'lap in progress' : 'run in progress';
+    }, 50);
+  }
+
+  function stopLive() {
+    if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+  }
+
+  function fmtTime(s) {
+    const m  = Math.floor(s / 60);
+    const ss = Math.floor(s % 60);
+    const ms = Math.floor((s % 1) * 1000);
+    return `${m}:${String(ss).padStart(2,'0')}.${String(ms).padStart(3,'0')}`;
+  }
+
+  // ── Table render ───────────────────────────────────────
+  function renderTable() {
+    const head = document.getElementById('tableHead');
+    const body = document.getElementById('tableBody');
+
+    if (!entries.length) {
+      head.innerHTML = '';
+      body.innerHTML = '<tr><td colspan="4" class="empty-state">// no data yet — arm the sensor and send the car</td></tr>';
+      return;
+    }
+
+    const isLap = mode === 'lap';
+    head.innerHTML = `<tr>
+      <th>${isLap ? 'Lap' : 'Run'}</th>
+      <th>Time</th>
+      <th>Delta</th>
+      <th>Status</th>
+    </tr>`;
+
+    const times = entries.map(e => e.time_s);
+    const best  = Math.min(...times);
+    const worst = Math.max(...times);
+
+    body.innerHTML = '';
+    entries.slice().reverse().forEach((e, i) => {
+      const isFirst = i === 0; // most recent
+      const delta   = entries.length > 1
+        ? (e.time_s - (entries[entries.indexOf(e) - 1]?.time_s ?? e.time_s))
+        : null;
+      const deltaStr = delta !== null && entries.indexOf(e) > 0
+        ? (delta >= 0 ? '+' : '') + delta.toFixed(3) + 's'
+        : '—';
+
+      let statusClass = '';
+      let statusText  = '—';
+      if (times.length > 1) {
+        if (e.time_s === best)  { statusClass = 'best-cell';  statusText = '▲ best'; }
+        if (e.time_s === worst) { statusClass = 'worst-cell'; statusText = '▼ worst'; }
+      }
+
+      const tr = document.createElement('tr');
+      if (isFirst) tr.classList.add('new-entry');
+      tr.innerHTML = `
+        <td>${e[isLap ? 'lap' : 'run']}</td>
+        <td class="time-cell ${statusClass}">${e.time_fmt}</td>
+        <td>${deltaStr}</td>
+        <td class="${statusClass}">${statusText}</td>
+      `;
+      body.appendChild(tr);
+    });
+  }
+
+  // ── Flash ──────────────────────────────────────────────
+  function flash() {
+    const el = document.getElementById('flashOverlay');
+    el.classList.add('flash');
+    setTimeout(() => el.classList.remove('flash'), 150);
+  }
+</script>
+</body>
+</html>
