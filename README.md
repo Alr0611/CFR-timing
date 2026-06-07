@@ -2,7 +2,7 @@
 
 Lap and acceleration timing system for Concordia Formula Racing (CFR).
 
-Built with an ESP32, laser tripwire sensors, and a Python/Flask backend with a browser-based UI. No commercial transponders, no subscriptions, no external dependencies.
+Built with an ESP32, laser tripwire sensors, and a Python/Flask backend with a browser-based UI. 
 
 ---
 
