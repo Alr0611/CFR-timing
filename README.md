@@ -2,7 +2,7 @@
 
 Lap and acceleration timing system for Concordia Formula Racing (CFR).
 
-Built with an ESP32, laser tripwire sensors, and a Python/Flask backend with a browser-based UI. 
+Built with an ESP32, laser tripwire sensors, and a Python/Flask backend with a browser-based UI. No commercial transponders, no subscriptions, no external dependencies.
 
 ---
 
@@ -27,6 +27,8 @@ A laser beam is stretched across the track gate. When the car breaks the beam, t
 **Lap** — single node at start/finish. First pass starts the timer, every subsequent pass records a lap. Used for autocross and endurance.
 
 **Accel** — two nodes, node 1 at start, node 2 at finish. Used for acceleration and skidpad events.
+
+Both modes tag every result with the active driver and rank a per-driver leaderboard.
 
 ---
 
@@ -77,7 +79,7 @@ ESP32 + RX side is powered by a USB power bank.
 5. For node 2: change `NODE_ID = 2`
 6. Flash to each ESP32
 
-### Backend
+### Backend (manual run)
 
 ```bash
 python3 -m venv venv
@@ -88,13 +90,58 @@ python backend/server.py
 
 Open `http://localhost:5000` in your browser.
 
-### On test day
+---
+
+## Run as an always-on service (Linux / systemd)
+
+So the server starts on boot and you never have to launch it by hand:
+
+```bash
+sudo cp deploy/cfr-timing.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable cfr-timing
+sudo systemctl start cfr-timing
+```
+
+Day-to-day commands:
+
+```bash
+systemctl status cfr-timing       # check if running
+sudo systemctl restart cfr-timing # reload after editing code
+sudo systemctl stop cfr-timing    # turn off
+sudo systemctl start cfr-timing   # turn on
+```
+
+**Note:** after editing `server.py` or `index.html`, run `sudo systemctl restart cfr-timing` so the changes take effect.
+
+The service file assumes the repo lives at `/home/aboud/cfr-timing` and uses the venv at `venv/`. Edit `deploy/cfr-timing.service` if your paths differ.
+
+---
+
+## Accessing from other devices
+
+The server binds to `0.0.0.0:5000`, so anyone on the same network can open it:
+
+```
+http://<your-laptop-ip>:5000
+```
+
+Find your IP with:
+
+```bash
+hostname -I | awk '{print $1}'
+```
+
+At the track, teammates connect to the ESP32's WiFi network and open the same address.
+
+---
+
+## On test day
 
 1. Power up ESP32 node(s)
 2. Connect laptop WiFi to `CFR-Timing` (password: `cfracing25`)
-3. Run `source venv/bin/activate && python backend/server.py`
-4. Open `http://localhost:5000`
-5. Select mode, click **Arm Sensor**, send the car
+3. Server is already running via systemd — just open `http://localhost:5000`
+4. Add drivers, pick the active one, select mode, hit **Arm**, send the car
 
 ---
 
@@ -109,6 +156,8 @@ cfr-timing/
 │   └── server.py
 ├── frontend/
 │   └── index.html
+├── deploy/
+│   └── cfr-timing.service
 ├── logs/              # auto-saved CSV exports (gitignored)
 ├── requirements.txt
 └── README.md
