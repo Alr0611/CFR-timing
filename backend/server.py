@@ -230,4 +230,4 @@ def api_export():
 if __name__ == "__main__":
     threading.Thread(target=udp_listener, daemon=True).start()
     print(f"[WEB] Open http://localhost:{FLASK_PORT}")
-    io.run(app, host="0.0.0.0", port=FLASK_PORT, debug=False)
+    io.run(app, host="0.0.0.0", port=FLASK_PORT, debug=False, allow_unsafe_werkzeug=True)
