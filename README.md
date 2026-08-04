@@ -1,6 +1,6 @@
 # CFR Timing
 
-Lap and acceleration timing system for Concordia Formula Racing (CFR).
+Lap and acceleration timing system.
 
 Built with an ESP32, laser tripwire sensors, and a Python/Flask backend with a browser-based UI. No commercial transponders, no subscriptions, no external dependencies.
 
@@ -165,6 +165,3 @@ cfr-timing/
 
 ---
 
-## Built by
-
-Abdulkarim Alrefae — DAQ, Concordia Formula Racing
