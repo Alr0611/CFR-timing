@@ -2,6 +2,7 @@ import socket
 import threading
 import time
 import os
+from collections import deque
 from datetime import datetime
 from flask import Flask, render_template, jsonify, request, Response
 from flask_socketio import SocketIO
@@ -11,6 +12,10 @@ UDP_IP     = "0.0.0.0"
 UDP_PORT   = 5005
 FLASK_PORT = 5000
 LOG_DIR    = os.path.join(os.path.dirname(__file__), "..", "logs")
+
+CLOCK_WINDOW  = 60     # packets used to estimate each node's clock offset
+NODE_TIMEOUT  = 3.0    # s without a packet before a node shows as offline
+BLOCKED_AFTER = 2.0    # s of continuous beam break before it shows as blocked
 # ──────────────────────────────────────────────────────────
 
 app = Flask(__name__, template_folder="../frontend")
@@ -28,16 +33,75 @@ state = {
     "_run_start":     None,
 }
 
-def handle_trigger(node_id: int, esp_ms: int):
-    """All timing uses the laptop wall clock at packet arrival."""
-    wall_ts = time.time()
+# per-node clock sync, duplicate filtering and health
+nodes = {}
+
+def _node(node_id: int) -> dict:
+    if node_id not in nodes:
+        nodes[node_id] = {
+            "offsets":      deque(maxlen=CLOCK_WINDOW),
+            "last_esp_ms":  None,
+            "seen":         deque(maxlen=64),
+            "last_seen":    None,
+            "beam_intact":  None,
+            "broken_since": None,
+        }
+    return nodes[node_id]
+
+def node_event_time(node_id: int, esp_ms: int, wall_ts: float) -> float:
+    """Convert a node's millis() timestamp to laptop time.
+
+    WiFi latency varies from a few ms to 100+ ms, so packet arrival time is a
+    noisy clock. The node's own timestamp is exact; the smallest observed
+    (arrival - esp) gap is the best estimate of its offset to the laptop clock.
+    """
+    n = _node(node_id)
+    if n["last_esp_ms"] is not None and esp_ms < n["last_esp_ms"]:
+        # node rebooted: its millis() restarted, old offsets and seqs are stale
+        n["offsets"].clear()
+        n["seen"].clear()
+    n["last_esp_ms"] = esp_ms
+    n["last_seen"]   = wall_ts
+    n["offsets"].append(wall_ts - esp_ms / 1000.0)
+    return esp_ms / 1000.0 + min(n["offsets"])
+
+def node_summary(now: float) -> list:
+    out = []
+    for node_id in sorted(nodes):
+        n = nodes[node_id]
+        if n["last_seen"] is None or now - n["last_seen"] > NODE_TIMEOUT:
+            status = "offline"
+        elif n["broken_since"] is not None and now - n["broken_since"] > BLOCKED_AFTER:
+            status = "blocked"
+        else:
+            status = "ok"
+        out.append({"node": node_id, "status": status})
+    return out
+
+def handle_trigger(node_id: int, esp_ms: int, seq, wall_ts: float):
     with lock:
+        n = _node(node_id)
+        event_ts = node_event_time(node_id, esp_ms, wall_ts)
+        if seq is not None:
+            if seq in n["seen"]:
+                return            # resend of a trigger we already counted
+            n["seen"].append(seq)
         if not state["armed"]:
             return
         if state["mode"] == "lap":
-            _handle_lap(wall_ts)
+            _handle_lap(event_ts)
         elif state["mode"] == "accel":
-            _handle_accel(node_id, wall_ts)
+            _handle_accel(node_id, event_ts)
+
+def handle_status(node_id: int, beam_intact: bool, esp_ms: int, wall_ts: float):
+    with lock:
+        n = _node(node_id)
+        node_event_time(node_id, esp_ms, wall_ts)
+        if beam_intact:
+            n["broken_since"] = None
+        elif n["broken_since"] is None:
+            n["broken_since"] = wall_ts
+        n["beam_intact"] = beam_intact
 
 def _handle_lap(wall_ts: float):
     if state["_lap_start"] is None:
@@ -90,14 +154,29 @@ def udp_listener():
     print(f"[UDP] Listening on port {UDP_PORT}")
     while True:
         data, addr = sock.recvfrom(128)
+        wall_ts = time.time()
         raw = data.decode("utf-8").strip()
-        print(f"[UDP] {addr} → {raw}")
         try:
             parts = raw.split(",")
-            if parts[0] == "TRIGGER" and len(parts) == 3:
-                handle_trigger(int(parts[1]), int(parts[2]))
+            if parts[0] == "TRIGGER" and len(parts) in (3, 4):
+                print(f"[UDP] {addr} → {raw}")
+                node_id, esp_ms = int(parts[1]), int(parts[2])
+                seq = int(parts[3]) if len(parts) == 4 else None
+                if seq is not None:
+                    sock.sendto(f"ACK,{node_id},{seq}".encode(), addr)
+                handle_trigger(node_id, esp_ms, seq, wall_ts)
+            elif parts[0] == "STATUS" and len(parts) == 4:
+                handle_status(int(parts[1]), parts[2] == "1", int(parts[3]), wall_ts)
         except Exception as e:
             print(f"[UDP] Parse error: {e}")
+
+def node_watch():
+    """Push node health to the UI once a second."""
+    while True:
+        with lock:
+            summary = node_summary(time.time())
+        io.emit("event", {"type": "nodes", "nodes": summary})
+        time.sleep(1)
 
 # ─── ROUTES ───────────────────────────────────────────────
 @app.route("/")
@@ -114,6 +193,7 @@ def api_state():
             "runs":          state["runs"],
             "drivers":       state["drivers"],
             "active_driver": state["active_driver"],
+            "nodes":         node_summary(time.time()),
         })
 
 @app.route("/api/arm", methods=["POST"])
@@ -229,5 +309,6 @@ def api_export():
 # ─── MAIN ─────────────────────────────────────────────────
 if __name__ == "__main__":
     threading.Thread(target=udp_listener, daemon=True).start()
+    threading.Thread(target=node_watch, daemon=True).start()
     print(f"[WEB] Open http://localhost:{FLASK_PORT}")
     io.run(app, host="0.0.0.0", port=FLASK_PORT, debug=False, allow_unsafe_werkzeug=True)

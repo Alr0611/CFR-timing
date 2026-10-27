@@ -165,3 +165,27 @@ cfr-timing/
 
 ---
 
+---
+
+## Track reliability (2026-10 fixes)
+
+First track tests failed for two reasons: sunlight and vibration. What changed:
+
+- **Vibration filter.** A pass only counts if the beam stays broken for `MIN_BREAK_MS` (8 ms). Mount vibration makes the beam flicker for a millisecond or two; a car blocks it for ~50–150 ms.
+- **Sunlight.** The LDR receiver also sees the sun, so on a sunny day the beam never reads as broken. The firmware can now drive a 38 kHz modulated IR beam (`USE_IR_CARRIER 1`, IR LED on `IR_TX_PIN`); pair it with a light-barrier receiver such as the Vishay TSSP4038 (set `BEAM_INTACT_LEVEL = LOW`). The receiver only responds to the carrier, so sunlight is ignored.
+- **Retroreflective layout (recommended).** Put the IR LED and receiver on the same post and a corner-cube reflector across the track. A corner cube returns the beam to its source even when tilted, so vibration barely affects alignment, and one ESP32 drives both the LED and the receiver.
+- **Broadcast instead of a fixed laptop IP.** Nodes broadcast to `192.168.4.255`, so it no longer matters which device joined the network first.
+- **Accel mode networking.** Only node 1 hosts `CFR-Timing`; node 2 joins it. Before, both nodes hosted their own network and the laptop could only hear one.
+- **Node clock timing.** The server times passes with each node's own `millis()` timestamp, aligned to the laptop clock using the smallest observed delay, instead of packet arrival time (WiFi jitter is a few ms to 100+ ms).
+- **No lost passes.** Triggers carry a sequence number and are resent until the server ACKs them; the server ignores duplicates.
+- **Node health in the UI.** Each node sends a heartbeat every second. The UI shows each node as `beam ok`, `beam blocked` (broken for over 2 s, likely misaligned) or `offline`.
+
+Packet formats (UDP port 5005):
+
+```
+TRIGGER,<node_id>,<timestamp_ms>,<seq>   node → server
+ACK,<node_id>,<seq>                       server → node
+STATUS,<node_id>,<beam_intact 0|1>,<timestamp_ms>   node → server, every 1 s
+```
+
+The server still accepts the old 3-field `TRIGGER` packet from unflashed nodes.

@@ -94,6 +94,10 @@
   }
   .conn .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted2); transition: all 0.3s; }
   .conn .dot.on { background: var(--mint); box-shadow: 0 0 8px var(--mint); }
+  .nodes { display: flex; gap: 10px; }
+  .nodes .dot.ok      { background: var(--mint); box-shadow: 0 0 8px var(--mint); }
+  .nodes .dot.blocked { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+  .nodes .dot.offline { background: var(--red); }
 
   .ghost-btn {
     font-family: 'Saira Condensed', sans-serif;
@@ -395,6 +399,7 @@
     <button id="modeAccel"            onclick="setMode('accel')">Accel</button>
   </div>
   <div class="cmd-spacer"></div>
+  <div class="nodes" id="nodes"></div>
   <div class="conn"><span class="dot" id="connDot"></span><span id="connText">connecting</span></div>
   <button class="ghost-btn" onclick="exportCSV()">Export</button>
   <button class="ghost-btn danger" onclick="resetSession()">Reset</button>
@@ -461,6 +466,7 @@
       case 'mode_changed': mode = e.mode; refresh(); break;
       case 'reset': entries = []; stopLive(); setTimer('0:00.000','idle','waiting for first trigger'); renderAll(); break;
       case 'drivers_changed': drivers = e.drivers; activeDriver = e.active_driver; renderChips(); break;
+      case 'nodes': renderNodes(e.nodes); break;
       case 'lap_started':
       case 'run_started': liveStart = Date.now(); startLive(); break;
       case 'lap':
@@ -484,7 +490,7 @@
       document.getElementById('sCountLabel').textContent = mode === 'lap' ? 'Laps' : 'Runs';
       document.getElementById('logTitle').textContent = mode === 'lap' ? 'Lap Log' : 'Run Log';
       document.getElementById('logSub').textContent = mode === 'lap' ? 'every lap, newest first' : 'every run, newest first';
-      updateArm(); renderChips(); renderAll();
+      updateArm(); renderChips(); renderAll(); renderNodes(s.nodes || []);
       setTimer('0:00.000','idle','waiting for first trigger');
     });
   }
@@ -516,6 +522,14 @@
   function setConn(ok){
     document.getElementById('connDot').classList.toggle('on', ok);
     document.getElementById('connText').textContent = ok ? 'connected' : 'offline';
+  }
+
+  // node health: ok / blocked (beam broken for >2 s, likely misaligned) / offline
+  function renderNodes(list){
+    const labels = { ok: 'beam ok', blocked: 'beam blocked', offline: 'offline' };
+    document.getElementById('nodes').innerHTML = list.map(n =>
+      `<div class="conn"><span class="dot ${n.status}"></span><span>Node ${n.node}: ${labels[n.status]}</span></div>`
+    ).join('');
   }
 
   function renderChips(){
